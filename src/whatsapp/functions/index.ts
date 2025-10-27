@@ -158,6 +158,7 @@ export * from './statusEnable';
 export * from './subscribePresence';
 export * from './syncABPropsTask';
 export * from './toUserLid';
+export * from './toUserLidOrThrow';
 export * from './typeAttributeFromProtobuf';
 export * from './unixTime';
 export * from './unmuteNewsletter';

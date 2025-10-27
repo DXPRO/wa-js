@@ -21,14 +21,13 @@ import {
   createChat,
   createChatRecord,
   findChat,
-  getEnforceCurrentLid,
   getExisting,
-  isLidMigrated,
   isUnreadTypeMsg,
   mediaTypeFromProtobuf,
   toUserLid,
   typeAttributeFromProtobuf,
 } from '../whatsapp/functions';
+import { Lid1X1MigrationUtils } from '../whatsapp/misc';
 
 webpack.onFullReady(applyPatch, 1000);
 webpack.onFullReady(applyPatchModel);
@@ -90,6 +89,33 @@ function applyPatch() {
   });
 
   wrapModuleFunction(createChatRecord, async (func, ...args) => {
+    const [chatWid, chatOptions] = args;
+
+    // CRITICAL: Always provide accountLid when isLidMigrated() is true
+    if (
+      Lid1X1MigrationUtils.isLidMigrated() &&
+      chatOptions &&
+      !(chatOptions as any).accountLid
+    ) {
+      try {
+        // Try to convert to LID only if chatWid is a user and not already a LID
+        let accountLid = chatWid;
+
+        if (chatWid.isUser && chatWid.isUser() && !chatWid.isLid()) {
+          const converted = toUserLid(chatWid);
+          if (converted && converted.isLid && converted.isLid()) {
+            accountLid = converted;
+          }
+        }
+
+        (chatOptions as any).accountLid = accountLid.toString();
+      } catch (error) {
+        // Last resort: use chatWid itself
+
+        (chatOptions as any).accountLid = chatWid.toString();
+      }
+    }
+
     const maxAttempts = 5;
     let delay = 1000;
 
@@ -110,46 +136,64 @@ function applyPatch() {
   wrapModuleFunction(findChat, async (func, ...args) => {
     const [chatId] = args;
 
+    // Only process LID chats
     if (!chatId.isLid()) {
       return await func(...args);
     }
 
     const contact = ContactStore.get(chatId);
     const existingChat = await getExisting(chatId);
+
     if (!existingChat && contact) {
       const chatParams: any = { chatId };
-      await createChat(
-        chatParams,
-        'createChat',
-        {
-          createdLocally: true,
-          lidOriginType: 'general',
-        },
-        {}
-      );
-      return await func(...args)!;
+
+      // Add accountLid if migrated to LID system
+      if (Lid1X1MigrationUtils.isLidMigrated()) {
+        try {
+          // chatId is already a LID, use it directly
+          chatParams.accountLid = chatId.toString();
+        } catch (error) {}
+      }
+
+      try {
+        await createChat(
+          chatParams,
+          'createChat',
+          {
+            createdLocally: true,
+            lidOriginType: 'general',
+          },
+          {}
+        );
+
+        // Wait for chat to be created and indexed
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Try to get the chat directly from store
+        const newChat = await getExisting(chatId);
+        if (newChat) {
+          return newChat;
+        }
+      } catch (error) {}
     }
+
     return await func(...args);
   });
 
-  wrapModuleFunction(getEnforceCurrentLid, (_func, ...args) => {
-    const [UserWid] = args;
-
-    try {
-      const LID = toUserLid ? toUserLid(UserWid) : null;
-      return LID || UserWid;
-    } catch {
-      return UserWid;
+  // Evita erro "No LID for user" ao chamar toUserLidOrThrow
+  try {
+    if (typeof functions.toUserLidOrThrow === 'function') {
+      wrapModuleFunction(functions.toUserLidOrThrow, (_func, ...args) => {
+        const [UserWid] = args;
+        try {
+          const LID = toUserLid ? toUserLid(UserWid) : null;
+          return LID || UserWid;
+        } catch {
+          return UserWid;
+        }
+      });
     }
-  });
-
-  wrapModuleFunction(isLidMigrated, (func, ...args) => {
-    try {
-      return func(...args);
-    } catch {
-      return false;
-    }
-  });
+  } catch {}
 }
 
 function applyPatchModel() {

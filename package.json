@@ -59,7 +59,7 @@
     "compare-versions": "^6.1.1",
     "compressorjs": "^1.2.1",
     "conventional-changelog-angular": "^8.0.0",
-    "conventional-changelog-cli": "^5.0.0",
+    "conventional-changelog-cli": "^4.1.0",
     "debug": "^4.4.3",
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^10.1.8",
